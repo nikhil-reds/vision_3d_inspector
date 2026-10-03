@@ -1,4 +1,4 @@
-"""Stage 1 — Input validation (GLB or OBJ reference model + 4 photos)."""
+"""Stage 1 — Input validation (GLB or OBJ reference model + 4–40 photos or video frames)."""
 from pathlib import Path
 
 import trimesh
@@ -42,8 +42,10 @@ def validate_inputs(model_path: Path, photo_paths: list[Path], unit: str = "m") 
     if not (extents > 0).all():
         raise PipelineError("invalid_glb", "Model geometry is degenerate (zero size along an axis).")
 
-    if len(photo_paths) != config.PHOTO_COUNT:
-        raise PipelineError("invalid_image", f"Expected {config.PHOTO_COUNT} photos, got {len(photo_paths)}.")
+    if not config.MIN_PHOTOS <= len(photo_paths) <= config.MAX_PHOTOS:
+        raise PipelineError(
+            "invalid_image", f"Expected {config.MIN_PHOTOS}–{config.MAX_PHOTOS} photos, got {len(photo_paths)}."
+        )
     images = []
     for i, p in enumerate(photo_paths, start=1):
         if not p.is_file():
