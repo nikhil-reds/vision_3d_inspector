@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { explainDifferences, type DifferencePoint } from "@/lib/inspection/differences";
 import { isInspectionId, readReport, readStatus } from "@/lib/inspection/server";
 import type { Verdict } from "@/lib/inspection/types";
 
@@ -13,6 +14,12 @@ const verdictStyle: Record<Verdict, { tone: string; icon: IconName; text: string
   PASS: { tone: "bg-emerald-400/10 text-emerald-300 ring-emerald-400/30", icon: "checkCircle", text: "Within tolerance" },
   REVIEW: { tone: "bg-amber-400/10 text-amber-300 ring-amber-400/30", icon: "alert", text: "Needs engineering review" },
   FAIL: { tone: "bg-rose-500/10 text-rose-300 ring-rose-400/30", icon: "x", text: "Out of tolerance" },
+};
+
+const severityTone: Record<DifferencePoint["severity"], string> = {
+  ok: "bg-emerald-400/10 text-emerald-300 ring-emerald-400/30",
+  warn: "bg-amber-400/10 text-amber-300 ring-amber-400/30",
+  bad: "bg-rose-500/10 text-rose-300 ring-rose-400/30",
 };
 
 const mm = (v: number) => `${v.toFixed(2)} mm`;
@@ -45,6 +52,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const { meta, result, gemini } = report;
   const m = result.metrics;
   const v = verdictStyle[result.status];
+  const differences = explainDifferences(result);
 
   const measurements: { label: string; value: string; hint?: string }[] = [
     { label: "Mean deviation", value: mm(m.meanDeviationMm), hint: result.verdictMetric === "meanDeviationMm" ? "Verdict metric" : undefined },
@@ -100,21 +108,78 @@ export default async function InspectionReportPage({ params }: { params: Promise
         </p>
       </section>
 
-      {/* Measurements */}
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {measurements.map((x) => (
-          <div key={x.label} className="panel p-4">
-            <p className="font-mono text-xl font-semibold text-white">{x.value}</p>
-            <p className="mt-1 text-xs text-mist-300">{x.label}</p>
-            {x.hint && <p className="mt-0.5 text-[11px] text-mist-400">{x.hint}</p>}
+      {/* 1. Shape difference */}
+      <section className="panel space-y-4 p-6">
+        <div>
+          <h2 className="font-semibold text-white">1. Shape difference</h2>
+          <p className="mt-1 text-sm text-mist-300">
+            The <span className="text-mist-200">grey outline</span> is the design (your 3D model). The <span className="text-accent-300">coloured points</span> are the
+            object that was built, rebuilt in 3D from your photos/video and lined up on the design. Blue means it matches; yellow and red show where the build is
+            off. Where grey shows with no colour on top, that part wasn&apos;t captured or is missing from the build.
+          </p>
+        </div>
+        {result.files.shapeDifference ? (
+          <img src={result.files.shapeDifference} alt="Design outline versus built object, front, side and top views" className="w-full rounded-xl" />
+        ) : (
+          <p className="rounded-xl bg-ink-800 p-4 text-sm text-mist-400 ring-1 ring-inset ring-white/10">
+            This report was created before the shape comparison existed. Run a new inspection to see it.
+          </p>
+        )}
+        {result.shape && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-mist-400">
+                <tr>
+                  <th className="py-2 pr-4 font-medium">Overall size</th>
+                  <th className="py-2 pr-4 font-medium">Design</th>
+                  <th className="py-2 pr-4 font-medium">Built</th>
+                  <th className="py-2 font-medium">Difference</th>
+                </tr>
+              </thead>
+              <tbody className="text-mist-200">
+                {result.shape.axes.map((axis, i) => {
+                  const design = result.shape!.designExtentsMm[i];
+                  const built = result.shape!.builtExtentsMm[i];
+                  const diff = built - design;
+                  return (
+                    <tr key={axis} className="border-t border-white/[0.06]">
+                      <td className="py-2 pr-4 capitalize">{axis}</td>
+                      <td className="py-2 pr-4 font-mono">{design.toFixed(1)} mm</td>
+                      <td className="py-2 pr-4 font-mono">{built.toFixed(1)} mm</td>
+                      <td className={cn("py-2 font-mono", Math.abs(diff) > result.thresholds.failMm ? "text-rose-300" : Math.abs(diff) > result.thresholds.passMm ? "text-amber-300" : "text-emerald-300")}>
+                        {diff >= 0 ? "+" : "−"}
+                        {Math.abs(diff).toFixed(1)} mm
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="mt-2 text-[11px] text-mist-400">Built size is measured from the captured surface only — sides that weren&apos;t filmed read smaller.</p>
           </div>
-        ))}
+        )}
       </section>
 
-      {/* Visual comparison */}
+      {/* 2. Differences explained */}
+      <section className="panel p-6">
+        <h2 className="font-semibold text-white">2. Differences explained</h2>
+        <ol className="mt-4 grid gap-3 md:grid-cols-2">
+          {differences.map((d, i) => (
+            <li key={d.title} className="flex gap-3 rounded-xl bg-ink-800/60 p-3 ring-1 ring-inset ring-white/[0.06]">
+              <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-xs ring-1 ring-inset", severityTone[d.severity])}>{i + 1}</span>
+              <div>
+                <p className="text-sm font-medium text-white">{d.title}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-mist-300">{d.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {/* 3. Visual comparison */}
       <section className="panel space-y-4 p-6">
-        <h2 className="font-semibold text-white">Visual comparison</h2>
-        <img src={result.files.heatmap} alt="Deviation heatmap across all four views" className="w-full rounded-xl" />
+        <h2 className="font-semibold text-white">3. Visual comparison</h2>
+        <img src={result.files.heatmap} alt="Deviation heatmap across all views" className="w-full rounded-xl" />
         <div className="space-y-4">
           {result.files.views.map((view, i) => (
             <div key={view} className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -131,6 +196,17 @@ export default async function InspectionReportPage({ params }: { params: Promise
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Measurements */}
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {measurements.map((x) => (
+          <div key={x.label} className="panel p-4">
+            <p className="font-mono text-xl font-semibold text-white">{x.value}</p>
+            <p className="mt-1 text-xs text-mist-300">{x.label}</p>
+            {x.hint && <p className="mt-0.5 text-[11px] text-mist-400">{x.hint}</p>}
+          </div>
+        ))}
       </section>
 
       {/* Deviation regions */}
