@@ -19,7 +19,8 @@ TOLERANCE_MM = PASS_THRESHOLD_MM  # a point deviating more than this is "outside
 VERDICT_METRIC = "meanDeviationMm"  # which metric the verdict is based on
 
 # --- Input validation ----------------------------------------------------------
-PHOTO_COUNT = 4
+MIN_PHOTOS = 4   # 4 hand-taken photos, or up to MAX_PHOTOS frames extracted from a video
+MAX_PHOTOS = 40
 MAX_MODEL_BYTES = 100 * 1024 * 1024
 MODEL_FORMATS = ("glb", "obj")
 # GLB is meters by spec; OBJ is unitless, so the uploader states its unit.
@@ -32,6 +33,11 @@ MAX_IMAGE_SIDE_PX = 8192
 DUST3R_IMAGE_SIZE = 512
 DUST3R_NITER = 300
 DUST3R_CONF_THRESHOLD = 3.0  # per-pixel confidence below this is discarded
+# Pairing every view with every other is O(n²) and runs a 16 GB GPU out of memory at ~25 video
+# frames; beyond this count each frame is paired with neighbours 1, 2, 4 and 8 steps away instead
+# (cyclic, since a walk-around ends where it started).
+DUST3R_COMPLETE_GRAPH_MAX_VIEWS = 12
+DUST3R_LARGE_SCENE_GRAPH = "logwin-4"
 
 # --- Reconstruction --------------------------------------------------------------
 MIN_POINTS = 2000              # minimum points left after cleaning
