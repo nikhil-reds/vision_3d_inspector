@@ -28,6 +28,7 @@ export function Tabs<T extends string>({ items, value, onChange, variant = "pill
           return (
             <button
               key={t.id}
+              type="button"
               role="tab"
               aria-selected={active}
               onClick={() => onChange(t.id)}
@@ -56,6 +57,7 @@ export function Tabs<T extends string>({ items, value, onChange, variant = "pill
         return (
           <button
             key={t.id}
+            type="button"
             role="tab"
             aria-selected={active}
             onClick={() => onChange(t.id)}

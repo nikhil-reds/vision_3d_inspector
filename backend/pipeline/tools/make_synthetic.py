@@ -1,6 +1,6 @@
 """Create a synthetic test case: a reference GLB plus 4 rendered "photos" of the part.
 
-    python -m pipeline.tools.make_synthetic <out_dir> [--defect]
+    python -m pipeline.tools.make_synthetic <out_dir> [--defect] [--video]
 
 Without --defect the photos show exactly the reference part, so the pipeline should
 report a small deviation (PASS). With --defect, the boss on the photographed part is
@@ -53,7 +53,8 @@ def _look_at(eye: np.ndarray, target: np.ndarray) -> np.ndarray:
     return pose
 
 
-def render_photos(mesh: trimesh.Trimesh, out_dir: Path, size=(1024, 768)) -> None:
+def render_views(mesh: trimesh.Trimesh, azimuths, size=(1024, 768)):
+    """Yield RGB renders of the part from cameras orbiting it at the given azimuths (degrees)."""
     import pyrender
 
     w, h = size
@@ -68,28 +69,49 @@ def render_photos(mesh: trimesh.Trimesh, out_dir: Path, size=(1024, 768)) -> Non
     cam = pyrender.IntrinsicsCamera(k[0, 0], k[1, 1], k[0, 2], k[1, 2], znear=0.01, zfar=10)
     renderer = pyrender.OffscreenRenderer(w, h)
     target = np.array([0.0, 0.04, 0.0])
-    for i, azimuth in enumerate((20, 70, 120, 170), start=1):
-        a = np.radians(azimuth)
-        eye = target + np.array([np.cos(a) * 0.42, 0.26, np.sin(a) * 0.42])
-        pose_gl = _look_at(eye, target) @ CV_TO_GL
-        cam_node = scene.add(cam, pose=pose_gl)
-        light = scene.add(pyrender.DirectionalLight(intensity=2.5), pose=pose_gl)
-        color, _ = renderer.render(scene)
-        scene.remove_node(cam_node)
-        scene.remove_node(light)
-        Image.fromarray(color).save(out_dir / f"photo-{i}.jpg", quality=92)
-    renderer.delete()
+    try:
+        for azimuth in azimuths:
+            a = np.radians(azimuth)
+            eye = target + np.array([np.cos(a) * 0.42, 0.26, np.sin(a) * 0.42])
+            pose_gl = _look_at(eye, target) @ CV_TO_GL
+            cam_node = scene.add(cam, pose=pose_gl)
+            light = scene.add(pyrender.DirectionalLight(intensity=2.5), pose=pose_gl)
+            color, _ = renderer.render(scene)
+            scene.remove_node(cam_node)
+            scene.remove_node(light)
+            yield color
+    finally:
+        renderer.delete()
+
+
+def write_video(mesh: trimesh.Trimesh, out: Path, seconds: int = 12, fps: int = 15) -> None:
+    """A full 360° walk-around clip (VP8 WebM, which browsers can decode)."""
+    import cv2
+
+    n = seconds * fps
+    writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"VP80"), fps, (1024, 768))
+    if not writer.isOpened():
+        raise SystemExit("OpenCV could not open a VP8 video writer.")
+    for color in render_views(mesh, np.linspace(0, 360, n, endpoint=False)):
+        writer.write(cv2.cvtColor(color, cv2.COLOR_RGB2BGR))
+    writer.release()
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("out_dir", type=Path)
     ap.add_argument("--defect", action="store_true", help="photograph a part whose boss is moved 8 mm")
+    ap.add_argument("--video", action="store_true", help="also write a 360° walk-around video (walkaround.webm)")
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     make_part(defect=False).export(args.out_dir / "model.glb")
-    render_photos(make_part(defect=args.defect), args.out_dir)
+    part = make_part(defect=args.defect)
+    for i, color in enumerate(render_views(part, (20, 70, 120, 170)), start=1):
+        Image.fromarray(color).save(args.out_dir / f"photo-{i}.jpg", quality=92)
     print(f"wrote model.glb and photo-1..4.jpg to {args.out_dir}")
+    if args.video:
+        write_video(part, args.out_dir / "walkaround.webm")
+        print(f"wrote walkaround.webm to {args.out_dir}")
 
 
 if __name__ == "__main__":
