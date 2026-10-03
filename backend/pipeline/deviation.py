@@ -55,12 +55,12 @@ def _location_label(c: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> str:
 
 
 def _regions(pts: np.ndarray, d: np.ndarray, lo, hi, diag: float) -> list[dict]:
-    tol = config.TOLERANCE_MM / MM
+    tol = config.FAIL_THRESHOLD_MM / MM  # hotspots only; at 2 mm the reconstruction noise merges into one blob
     out_idx = np.flatnonzero(d > tol)
     if len(out_idx) < 20:
         return []
     pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts[out_idx]))
-    labels = np.asarray(pcd.cluster_dbscan(eps=diag * 0.03, min_points=20))
+    labels = np.asarray(pcd.cluster_dbscan(eps=diag * 0.015, min_points=20))
     regions = []
     for lab in range(labels.max() + 1 if labels.size else 0):
         sel = out_idx[labels == lab]
