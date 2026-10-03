@@ -10,6 +10,7 @@ import shutil
 import sys
 import time
 import traceback
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,18 +31,25 @@ def _read_meta(paths: InspectionPaths) -> dict:
     return json.loads(meta.read_text(encoding="utf-8")) if meta.is_file() else {}
 
 
+@contextmanager
+def _stage_imports(code: str):
+    """Heavy libraries are imported per stage, so a broken install fails *that* stage with
+    a readable message instead of crashing before status.json is written."""
+    try:
+        yield
+    except (ImportError, OSError) as e:
+        text = str(e)
+        if "Application Control" in text or "WinError 4551" in text:
+            raise PipelineError(
+                code,
+                "Windows Smart App Control blocked a native library (PyTorch/Open3D) from loading. "
+                "Turn off Smart App Control or run the pipeline in WSL. Details: " + text,
+            ) from e
+        raise PipelineError(code, f"A required Python library could not be loaded: {text}") from e
+
+
 def run_inspection(inspection_id: str, glb_path: Path, photo_paths: list[Path], model_unit: str = "m") -> dict:
     """glb_path may point to a .glb or an .obj reference model (OBJ uses model_unit)."""
-    # Imported lazily so a missing heavy dependency is reported as a stage failure.
-    from .alignment import align
-    from .deviation import compute_deviation, verdict
-    from .gemini import generate_report
-    from .pose import estimate_poses
-    from .reconstruction import reconstruct
-    from .rendering import camera_in_model_frame, render_views, sample_model
-    from .validation import load_model_mesh, validate_inputs
-    from .visualization import visualize
-
     paths = InspectionPaths(inspection_id)
     for d in OUTPUT_DIRS:  # a retry starts from clean outputs
         shutil.rmtree(paths.root / d, ignore_errors=True)
@@ -61,34 +69,47 @@ def run_inspection(inspection_id: str, glb_path: Path, photo_paths: list[Path], 
 
     try:
         t0 = begin(0)
+        from .validation import load_model_mesh, validate_inputs
         validation = validate_inputs(glb_path, photo_paths, model_unit)
         mesh = load_model_mesh(glb_path, model_unit)
         end(t0)
 
         t0 = begin(1)
+        with _stage_imports("pose_estimation_failed"):
+            from .pose import estimate_poses
         pose, pose_info = estimate_poses(paths, photo_paths)
         end(t0)
 
         t0 = begin(2)
+        with _stage_imports("reconstruction_failed"):
+            from .reconstruction import reconstruct
         recon, recon_info = reconstruct(paths, pose)
         end(t0)
 
         t0 = begin(3)
+        with _stage_imports("glb_rendering_failed"):
+            from .rendering import camera_in_model_frame, render_views, sample_model
         model_pcd = sample_model(mesh)
         coarse, coarse_cams, render_info = render_views(paths, mesh, model_pcd, recon, pose)
         end(t0)
 
         t0 = begin(4)
+        with _stage_imports("alignment_failed"):
+            from .alignment import align
         aligned, transform, alignment = align(paths, recon, model_pcd, coarse)
         cams = [camera_in_model_frame(p, transform) for p in pose.poses]
         end(t0)
 
         t0 = begin(5)
+        with _stage_imports("deviation_calculation_failed"):
+            from .deviation import compute_deviation, verdict
         d_m, dev = compute_deviation(aligned, mesh, cams, pose.intrinsics, pose.size)
         status = verdict(dev["metrics"])
         end(t0)
 
         t0 = begin(6)
+        with _stage_imports("visualization_failed"):
+            from .visualization import visualize
         vis = visualize(paths, mesh, aligned, d_m, pose, cams, dev["metrics"])
         end(t0)
 
@@ -135,6 +156,8 @@ def run_inspection(inspection_id: str, glb_path: Path, photo_paths: list[Path], 
         # Stage 8 — a Gemini failure must not fail the geometric inspection.
         t0 = begin(7)
         try:
+            with _stage_imports("gemini_failed"):
+                from .gemini import generate_report
             gemini = generate_report(result)
         except PipelineError as e:
             _log(f"Gemini unavailable: {e.message}")
