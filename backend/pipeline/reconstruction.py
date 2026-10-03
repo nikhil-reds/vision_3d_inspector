@@ -29,21 +29,39 @@ def reconstruct(paths: InspectionPaths, pose: PoseResult) -> tuple[o3d.geometry.
         raise PipelineError("reconstruction_failed", "DUSt3R produced an empty point cloud.")
     raw_count = len(pcd.points)
 
-    # Voxel size relative to the cloud's own extent — DUSt3R's scale is arbitrary.
-    diag = float(np.linalg.norm(pcd.get_max_bound() - pcd.get_min_bound()))
+    # Pass 1 (coarse, whole scene): find the object. Voxel size is relative to the cloud's
+    # own extent because DUSt3R's scale is arbitrary.
+    full = pcd
+    diag = float(np.linalg.norm(full.get_max_bound() - full.get_min_bound()))
     voxel = diag / 200
-    pcd = pcd.voxel_down_sample(voxel)
-    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+    coarse = full.voxel_down_sample(voxel)
+    coarse, _ = coarse.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
 
-    plane_removed = False
-    if config.REMOVE_SUPPORT_PLANE and len(pcd.points) > config.MIN_POINTS:
-        _, inliers = pcd.segment_plane(distance_threshold=voxel * 1.5, ransac_n=3, num_iterations=1000)
-        if len(inliers) >= config.SUPPORT_PLANE_MIN_FRACTION * len(pcd.points):
-            rest = pcd.select_by_index(inliers, invert=True)
+    plane = None
+    if config.REMOVE_SUPPORT_PLANE and len(coarse.points) > config.MIN_POINTS:
+        model, inliers = coarse.segment_plane(distance_threshold=voxel * 1.5, ransac_n=3, num_iterations=1000)
+        if len(inliers) >= config.SUPPORT_PLANE_MIN_FRACTION * len(coarse.points):
+            rest = coarse.select_by_index(inliers, invert=True)
             if len(rest.points) >= config.MIN_POINTS:
-                pcd, plane_removed = rest, True
+                coarse, plane = rest, (np.asarray(model[:3]), float(model[3]), voxel * 1.5)
+    coarse = _largest_cluster(coarse, eps=voxel * 4)
+    if coarse.is_empty():
+        raise PipelineError("reconstruction_failed", "Could not isolate the object in the point cloud.")
 
-    pcd = _largest_cluster(pcd, eps=voxel * 4)
+    # Pass 2 (fine, object only): re-sample the full-resolution points inside the object's
+    # bounding box so the part keeps detail instead of the scene-sized voxel grid.
+    box = coarse.get_axis_aligned_bounding_box()
+    box = box.scale(1.05, box.get_center())
+    pcd = full.crop(box)
+    if plane is not None:
+        normal, offset, margin = plane
+        dist = np.abs(np.asarray(pcd.points) @ normal + offset)
+        pcd = pcd.select_by_index(np.flatnonzero(dist > margin))
+    obj_voxel = float(np.linalg.norm(box.get_extent())) / 300
+    pcd = pcd.voxel_down_sample(obj_voxel)
+    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+    pcd = _largest_cluster(pcd, eps=obj_voxel * 4)
+    plane_removed = plane is not None
 
     if pcd.is_empty():
         raise PipelineError("reconstruction_failed", "Point cloud is empty after cleaning.")
