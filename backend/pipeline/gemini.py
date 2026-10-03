@@ -74,7 +74,7 @@ def generate_report(result: dict) -> dict:
     """Returns the Gemini report. Raises PipelineError('gemini_failed') on any failure."""
     _load_env_file()
     api_key = os.environ.get("GEMINI_API_KEY")
-    model = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
+    model = os.environ.get("GEMINI_MODEL") or "gemini-3.8-flash"
     if not api_key:
         raise PipelineError("gemini_failed", "GEMINI_API_KEY is not set.")
     payload = build_gemini_input(result)
