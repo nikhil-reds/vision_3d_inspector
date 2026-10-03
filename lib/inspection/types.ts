@@ -60,8 +60,11 @@ export interface InspectionResult {
     meanDeviationMm: number;
     maxDeviationMm: number;
   }[];
+  /** Absent on reports created before shape comparison was added. */
+  shape?: { axes: string[]; designExtentsMm: number[]; builtExtentsMm: number[] };
   timingsSec: Record<string, number>;
   files: {
+    shapeDifference?: string;
     photos: string[];
     views: string[];
     renders: string[];

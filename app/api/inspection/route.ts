@@ -4,7 +4,9 @@ import path from "node:path";
 import { inspectionDir, isInspectionId, readStatus, startPipeline, writeJson } from "@/lib/inspection/server";
 import type { InspectionMeta } from "@/lib/inspection/types";
 
-const PHOTO_COUNT = 4;
+// 4 hand-taken photos, or up to 40 frames extracted from a walk-around video.
+const MIN_PHOTOS = 4;
+const MAX_PHOTOS = 40;
 const MAX_MODEL_BYTES = 100 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
 const MODEL_FORMATS = ["glb", "obj"] as const;
@@ -66,9 +68,10 @@ export async function POST(request: Request) {
   if (!modelUnit) return bad("OBJ unit must be mm, cm or m.");
 
   const photos: Buffer[] = [];
-  for (let i = 1; i <= PHOTO_COUNT; i++) {
+  for (let i = 1; i <= MAX_PHOTOS; i++) {
     const photo = form.get(`photo-${i}`);
-    if (!(photo instanceof File) || photo.size === 0) return bad(`Photo ${i} is missing — exactly ${PHOTO_COUNT} photos are required.`);
+    if (photo === null && i > MIN_PHOTOS) break;
+    if (!(photo instanceof File) || photo.size === 0) return bad(`Photo ${i} is missing — at least ${MIN_PHOTOS} photos are required.`);
     if (photo.size > MAX_PHOTO_BYTES) return bad(`Photo ${i} is larger than 20 MB.`);
     const buf = Buffer.from(await photo.arrayBuffer());
     if (!isImage(buf)) return bad(`Photo ${i} is not a JPEG, PNG or WebP image.`);
