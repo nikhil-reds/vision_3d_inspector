@@ -46,6 +46,7 @@ const paths = {
   help: <><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.6 2.6 0 0 1 5 1c0 1.8-2.5 2.3-2.5 3.5M12 17h.01" /></>,
   more: <path d="M5 12h.01M12 12h.01M19 12h.01" strokeWidth="3" />,
   play: <path d="M7 4.5v15l12-7.5z" />,
+  video: <><rect x="2.5" y="6" width="13" height="12" rx="2.5" /><path d="m15.5 10.5 6-3.5v10l-6-3.5" /></>,
   refresh: <><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 13a8 8 0 0 0 14.6 4.5L20 16" /><path d="M4 4v4h4M20 20v-4h-4" /></>,
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
   moon: <path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5" />,

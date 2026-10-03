@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import INSPECTIONS_DIR, MODEL_FORMATS, PHOTO_COUNT, PUBLIC_URL_PREFIX
+from .config import INSPECTIONS_DIR, MAX_PHOTOS, MODEL_FORMATS, PUBLIC_URL_PREFIX
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,13 @@ class InspectionPaths:
 
     @property
     def photos(self) -> list[Path]:
-        return [self.root / "input" / f"photo-{i}.jpg" for i in range(1, PHOTO_COUNT + 1)]
+        found = []
+        for i in range(1, MAX_PHOTOS + 1):
+            p = self.root / "input" / f"photo-{i}.jpg"
+            if not p.is_file():
+                break
+            found.append(p)
+        return found
 
     @property
     def status(self) -> Path:
