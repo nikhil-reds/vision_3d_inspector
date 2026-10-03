@@ -20,7 +20,7 @@ RESPONSE_SCHEMA = {
 PROMPT = """You are writing the explanation section of an automated 3D fabrication inspection report.
 
 A deterministic geometry pipeline compared a reference design (GLB) with a 3D reconstruction built
-from 4 photos of the fabricated part (DUSt3R reconstruction, Open3D ICP alignment). The numbers and
+from photos (or video frames) of the fabricated part (DUSt3R reconstruction, Open3D ICP alignment). The numbers and
 the verdict below are FINAL and AUTHORITATIVE.
 
 Rules:

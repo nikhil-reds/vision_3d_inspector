@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 from . import config
 from .errors import PipelineError
@@ -55,7 +55,8 @@ def _run(device: str, photo_paths) -> PoseResult:
     model = _model.to(device).eval()
 
     imgs = load_images([str(p) for p in photo_paths], size=config.DUST3R_IMAGE_SIZE, verbose=False)
-    pairs = make_pairs(imgs, scene_graph="complete", prefilter=None, symmetrize=True)
+    graph = "complete" if len(imgs) <= config.DUST3R_COMPLETE_GRAPH_MAX_VIEWS else config.DUST3R_LARGE_SCENE_GRAPH
+    pairs = make_pairs(imgs, scene_graph=graph, prefilter=None, symmetrize=True)
     with torch.no_grad():
         output = inference(pairs, model, device, batch_size=1, verbose=False)
     scene = global_aligner(output, device=device, mode=Mode.PointCloudOptimizer, verbose=False)
@@ -74,9 +75,34 @@ def _run(device: str, photo_paths) -> PoseResult:
     )
 
 
+def _uniform_aspect(paths: InspectionPaths, photo_paths) -> list:
+    # DUSt3R crops each photo by its own aspect ratio; mixed portrait/landscape shots
+    # would give views of different sizes, so center-crop the minority orientation to
+    # the majority's aspect ratio and leave the rest untouched.
+    photos = [ImageOps.exif_transpose(Image.open(p)) for p in photo_paths]
+    landscape = [im.width >= im.height for im in photos]
+    if len(set(landscape)) == 1:
+        return list(photo_paths)
+    majority = sum(landscape) * 2 >= len(landscape)
+    ref = next(im for im, l in zip(photos, landscape) if l == majority)
+    ratio = ref.width / ref.height
+    out = []
+    for i, (p, im, l) in enumerate(zip(photo_paths, photos, landscape), start=1):
+        if l == majority:
+            out.append(p)
+            continue
+        w, h = min(im.width, round(im.height * ratio)), min(im.height, round(im.width / ratio))
+        left, top = (im.width - w) // 2, (im.height - h) // 2
+        dest = paths.sub("reconstruction", f"cropped-{i}.jpg")
+        im.convert("RGB").crop((left, top, left + w, top + h)).save(dest, quality=95)
+        out.append(dest)
+    return out
+
+
 def estimate_poses(paths: InspectionPaths, photo_paths) -> tuple[PoseResult, dict]:
     import torch
 
+    photo_paths = _uniform_aspect(paths, photo_paths)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         try:
