@@ -6,6 +6,53 @@ The platform allows users to upload a reference 3D model such as a `.glb` file, 
 
 ---
 
+# Running the local inspection pipeline (testing MVP)
+
+The home page form (`/`) takes a project name, a reference model (`.glb`, or `.obj` with its unit) and 4 photos (camera or gallery). On submit:
+
+```text
+POST /api/inspection → public/inspections/{id}/input/ → Python pipeline (background process)
+→ /inspection/{id}/processing (polls GET /api/inspection/{id}/status)
+→ /inspection/{id}/report     (reads report/result.json + report/gemini-report.json)
+```
+
+The pipeline (`backend/pipeline/`) runs 8 stages: validation, DUSt3R camera poses, Open3D reconstruction, GLB rendering at the estimated poses, ICP alignment, deviation metrics, heatmaps and the Gemini explanation. It updates `status.json` after every stage. Gemini only explains the numbers; it never computes them. The PASS/REVIEW thresholds are testing values in `backend/pipeline/config.py`.
+
+**One-time setup (Windows, Python 3.12, NVIDIA GPU optional):**
+
+```bash
+python -m venv backend/.venv
+backend/.venv/Scripts/python -m pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cu126
+backend/.venv/Scripts/python -m pip install --no-deps torchvision==0.29.1
+backend/.venv/Scripts/python -m pip install -r backend/requirements.txt
+git clone --recursive https://github.com/naver/dust3r backend/third_party/dust3r
+# DUSt3R checkpoint (~2 GB): config.json + model.safetensors from
+# https://huggingface.co/naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt
+# into backend/checkpoints/DUSt3R_ViTLarge_BaseDecoder_512_dpt/
+```
+
+Copy `.env.example` to `.env` and set `GEMINI_API_KEY` and `GEMINI_MODEL`. Then run `npm run dev` and open http://localhost:3000.
+
+**Test without a real part.** This command writes a reference GLB and 4 rendered photos to `tmp/synth`. Add `--defect` to move the boss on the photographed part by 8 mm.
+
+```bash
+cd backend && .venv/Scripts/python -m pipeline.tools.make_synthetic ../tmp/synth
+```
+
+**Run one inspection from the command line.** Use this for an inspection folder that already exists under `public/inspections/`:
+
+```bash
+cd backend && .venv/Scripts/python -m pipeline.index <inspection-id>
+```
+
+**Limitations:**
+- DUSt3R has no absolute scale, so scale is estimated by aligning to the model. Millimetre values are relative to the design size.
+- 4 photos give a sparse reconstruction, so shiny or textureless parts may fail.
+- One inspection runs at a time. Files created at runtime under `public/` are served by `next dev`.
+- DUSt3R is licensed CC BY-NC-SA 4.0 (non-commercial use only).
+
+---
+
 # Overview
 
 `vision3d-inspector` is designed for quality inspection of fabricated physical objects.
