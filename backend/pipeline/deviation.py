@@ -115,7 +115,14 @@ def compute_deviation(aligned: o3d.geometry.PointCloud, mesh: trimesh.Trimesh, c
             "visibleModelCoverage": float(visible.mean() * 100),
         }
         metrics = {k: round(v, 3) if isinstance(v, float) else v for k, v in metrics.items()}
-        return d_r2m, {"metrics": metrics, "regions": _regions(pts, d_r2m, lo, hi, diag)}
+        # 1st–99th percentile so stray reconstruction points don't inflate the built size.
+        built = np.percentile(pts, 99, axis=0) - np.percentile(pts, 1, axis=0)
+        shape = {
+            "axes": ["width (X)", "height (Y)", "depth (Z)"],
+            "designExtentsMm": [round(float(x) * MM, 1) for x in mesh.bounding_box.extents],
+            "builtExtentsMm": [round(float(x) * MM, 1) for x in built],
+        }
+        return d_r2m, {"metrics": metrics, "regions": _regions(pts, d_r2m, lo, hi, diag), "shape": shape}
     except PipelineError:
         raise
     except Exception as e:  # noqa: BLE001
