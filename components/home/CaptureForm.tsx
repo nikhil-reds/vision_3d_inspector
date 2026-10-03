@@ -6,8 +6,17 @@ import { Button } from "@/components/ui/Button";
 import { Field, TextInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
+import { Tabs } from "@/components/ui/Tabs";
+import { extractVideoFrames } from "@/lib/videoFrames";
 
 const PHOTO_COUNT = 4;
+const VIDEO_FRAME_COUNT = 25;
+
+type Source = "video" | "photos";
+const sourceTabs: { id: Source; label: string; icon: "video" | "camera" }[] = [
+  { id: "video", label: "Walk-around video", icon: "video" },
+  { id: "photos", label: `${PHOTO_COUNT} photos`, icon: "camera" },
+];
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
 const MODEL_EXTENSIONS = [".glb", ".obj"];
 
@@ -50,7 +59,12 @@ export function CaptureForm() {
   const [model, setModel] = useState<File | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [objUnit, setObjUnit] = useState<ObjUnit>("mm");
+  const [source, setSource] = useState<Source>("video");
   const [photos, setPhotos] = useState<string[]>([]);
+  const [video, setVideo] = useState<File | null>(null);
+  const [frames, setFrames] = useState<string[]>([]);
+  const [extracted, setExtracted] = useState<number | null>(null);
+  const [videoError, setVideoError] = useState<string | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -114,6 +128,35 @@ export function CaptureForm() {
 
   const removePhoto = (i: number) => setPhotos((p) => p.filter((_, n) => n !== i));
 
+  const pickVideo = async (file: File | undefined) => {
+    if (!file) return;
+    setVideoError(null);
+    setFrames([]);
+    if (!file.type.startsWith("video/")) {
+      setVideo(null);
+      setVideoError("Choose a video file (MP4, MOV or WebM).");
+      return;
+    }
+    setVideo(file);
+    setExtracted(0);
+    try {
+      setFrames(await extractVideoFrames(file, VIDEO_FRAME_COUNT, MAX_UPLOAD_SIDE, setExtracted));
+    } catch (e) {
+      setVideo(null);
+      setVideoError(e instanceof Error ? e.message : "Could not read frames from this video.");
+    } finally {
+      setExtracted(null);
+    }
+  };
+
+  const switchSource = (next: Source) => {
+    if (next === "video") stopCamera();
+    setSource(next);
+  };
+
+  const images = source === "video" ? frames : photos;
+  const imagesReady = source === "video" ? frames.length === VIDEO_FRAME_COUNT : photos.length === PHOTO_COUNT;
+
   const pickModel = (file: File | undefined) => {
     if (!file) return;
     if (!MODEL_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) {
@@ -125,7 +168,7 @@ export function CaptureForm() {
     setModel(file);
   };
 
-  const canSubmit = name.trim().length > 0 && model !== null && photos.length === PHOTO_COUNT && !submitting;
+  const canSubmit = name.trim().length > 0 && model !== null && imagesReady && !submitting;
 
   const submit = async () => {
     if (!canSubmit || !model) return;
@@ -137,7 +180,7 @@ export function CaptureForm() {
       body.append("projectName", name.trim());
       body.append("model", model);
       body.append("modelUnit", isObj(model) ? objUnit : "m");
-      const blobs = await Promise.all(photos.map(toJpeg));
+      const blobs = await Promise.all(images.map(toJpeg));
       blobs.forEach((blob, i) => body.append(`photo-${i + 1}`, blob, `photo-${i + 1}.jpg`));
       const res = await fetch("/api/inspection", { method: "POST", body });
       const data = await res.json().catch(() => ({}));
@@ -191,78 +234,150 @@ export function CaptureForm() {
       )}
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between text-sm font-medium text-mist-200">
-          Photos
-          <span className="font-mono text-xs text-mist-400">
-            {photos.length} / {PHOTO_COUNT}
-          </span>
-        </div>
-
-        {cameraOn && (
-          <div className="space-y-3">
-            <video ref={videoRef} autoPlay playsInline muted className="aspect-[4/3] w-full rounded-xl bg-black object-cover" />
-            <div className="flex gap-2">
-              <Button icon="camera" className="flex-1" onClick={takePhoto}>
-                Take photo {photos.length + 1}
-              </Button>
-              <Button variant="secondary" onClick={stopCamera}>
-                Close
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {!cameraOn && photos.length < PHOTO_COUNT && (
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" icon="camera" onClick={startCamera}>
-              {photos.length === 0 ? "Open camera" : "Use camera"}
-            </Button>
-            <label
-              htmlFor="project-photos"
-              className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-white/[0.06] px-4 text-sm font-medium text-white ring-1 ring-inset ring-white/10 transition-all hover:bg-white/[0.1]"
-            >
-              <Icon name="image" size={16} />
-              From gallery
-            </label>
-            <input
-              id="project-photos"
-              type="file"
-              accept="image/*"
-              multiple
-              className="sr-only"
-              onChange={(e) => {
-                addFromGallery(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </div>
-        )}
-
-        {error && <p className="text-xs text-rose-300">{error}</p>}
-
-        <div className="grid grid-cols-4 gap-2">
-          {Array.from({ length: PHOTO_COUNT }, (_, i) => (
-            <div key={i} className="relative aspect-square overflow-hidden rounded-lg bg-ink-800 ring-1 ring-inset ring-white/10">
-              {photos[i] ? (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={photos[i]} alt={`Photo ${i + 1}`} className="size-full object-cover" />
-                  <button
-                    type="button"
-                    aria-label={`Remove photo ${i + 1}`}
-                    onClick={() => removePhoto(i)}
-                    className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-ink-950/80 text-white"
-                  >
-                    <Icon name="x" size={12} />
-                  </button>
-                </>
-              ) : (
-                <span className="flex size-full items-center justify-center font-mono text-xs text-mist-400">{i + 1}</span>
-              )}
-            </div>
-          ))}
-        </div>
+        <div className="text-sm font-medium text-mist-200">Real object</div>
+        <Tabs items={sourceTabs} value={source} onChange={switchSource} size="sm" className="w-full [&>button]:flex-1 [&>button]:justify-center" />
       </div>
+
+      {source === "video" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-sm font-medium text-mist-200">
+            Video
+            <span className="font-mono text-xs text-mist-400">
+              {extracted !== null ? extracted : frames.length} / {VIDEO_FRAME_COUNT} frames
+            </span>
+          </div>
+          <p className="text-xs leading-relaxed text-mist-400">
+            Walk slowly all the way around the object, keeping the whole object in frame. {VIDEO_FRAME_COUNT} sharp frames are
+            picked from the video in your browser — only those frames are uploaded.
+          </p>
+
+          <label
+            htmlFor="project-video"
+            className={`flex items-center gap-3 rounded-xl bg-ink-800 p-3 ring-1 ring-inset ring-white/10 transition ${
+              extracted !== null ? "pointer-events-none opacity-60" : "cursor-pointer hover:ring-white/20"
+            }`}
+          >
+            <span className="flex size-10 items-center justify-center rounded-lg bg-white/5 text-accent-300">
+              <Icon name="video" size={18} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-white">{video ? video.name : "Choose or record a video"}</span>
+              <span className="block text-xs text-mist-400">
+                {extracted !== null
+                  ? `Extracting frames… ${extracted} / ${VIDEO_FRAME_COUNT}`
+                  : video
+                    ? `${formatSize(video.size)} · tap to choose another`
+                    : "MP4, MOV or WebM · 10–60 seconds works best"}
+              </span>
+            </span>
+            {frames.length === VIDEO_FRAME_COUNT && <Icon name="checkCircle" size={18} className="text-emerald-300" />}
+          </label>
+          <input
+            id="project-video"
+            type="file"
+            accept="video/*"
+            className="sr-only"
+            disabled={extracted !== null}
+            onChange={(e) => {
+              void pickVideo(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+
+          {videoError && <p className="text-xs text-rose-300">{videoError}</p>}
+
+          {(frames.length > 0 || extracted !== null) && (
+            <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-7">
+              {Array.from({ length: VIDEO_FRAME_COUNT }, (_, i) => (
+                <div key={i} className="relative aspect-square overflow-hidden rounded-lg bg-ink-800 ring-1 ring-inset ring-white/10">
+                  {frames[i] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={frames[i]} alt={`Video frame ${i + 1}`} className="size-full object-cover" />
+                  ) : (
+                    <span className="flex size-full items-center justify-center font-mono text-xs text-mist-400">{i + 1}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {source === "photos" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-sm font-medium text-mist-200">
+            Photos
+            <span className="font-mono text-xs text-mist-400">
+              {photos.length} / {PHOTO_COUNT}
+            </span>
+          </div>
+  
+          {cameraOn && (
+            <div className="space-y-3">
+              <video ref={videoRef} autoPlay playsInline muted className="aspect-[4/3] w-full rounded-xl bg-black object-cover" />
+              <div className="flex gap-2">
+                <Button icon="camera" className="flex-1" onClick={takePhoto}>
+                  Take photo {photos.length + 1}
+                </Button>
+                <Button variant="secondary" onClick={stopCamera}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+  
+          {!cameraOn && photos.length < PHOTO_COUNT && (
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="secondary" icon="camera" onClick={startCamera}>
+                {photos.length === 0 ? "Open camera" : "Use camera"}
+              </Button>
+              <label
+                htmlFor="project-photos"
+                className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-white/[0.06] px-4 text-sm font-medium text-white ring-1 ring-inset ring-white/10 transition-all hover:bg-white/[0.1]"
+              >
+                <Icon name="image" size={16} />
+                From gallery
+              </label>
+              <input
+                id="project-photos"
+                type="file"
+                accept="image/*"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  addFromGallery(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          )}
+  
+          {error && <p className="text-xs text-rose-300">{error}</p>}
+  
+          <div className="grid grid-cols-4 gap-2">
+            {Array.from({ length: PHOTO_COUNT }, (_, i) => (
+              <div key={i} className="relative aspect-square overflow-hidden rounded-lg bg-ink-800 ring-1 ring-inset ring-white/10">
+                {photos[i] ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photos[i]} alt={`Photo ${i + 1}`} className="size-full object-cover" />
+                    <button
+                      type="button"
+                      aria-label={`Remove photo ${i + 1}`}
+                      onClick={() => removePhoto(i)}
+                      className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-ink-950/80 text-white"
+                    >
+                      <Icon name="x" size={12} />
+                    </button>
+                  </>
+                ) : (
+                  <span className="flex size-full items-center justify-center font-mono text-xs text-mist-400">{i + 1}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {submitError && <p className="text-sm text-rose-300">{submitError}</p>}
 
