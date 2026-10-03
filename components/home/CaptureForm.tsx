@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Field, TextInput } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -20,11 +21,29 @@ const objUnitOptions: { value: ObjUnit; label: string }[] = [
 
 const isObj = (file: File | null) => !!file && file.name.toLowerCase().endsWith(".obj");
 
+const MAX_UPLOAD_SIDE = 2048;
+
+/** Re-encode any captured/picked image as a JPEG (fixes orientation, caps size for upload). */
+async function toJpeg(dataUrl: string): Promise<Blob> {
+  const img = new Image();
+  img.src = dataUrl;
+  await img.decode();
+  const scale = Math.min(1, MAX_UPLOAD_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+  if (!blob) throw new Error("Could not encode photo");
+  return blob;
+}
+
 function formatSize(bytes: number) {
   return bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`;
 }
 
 export function CaptureForm() {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [name, setName] = useState("");
@@ -34,7 +53,8 @@ export function CaptureForm() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [cameraOn, setCameraOn] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -105,47 +125,36 @@ export function CaptureForm() {
     setModel(file);
   };
 
-  const canSubmit = name.trim().length > 0 && model !== null && photos.length === PHOTO_COUNT;
+  const canSubmit = name.trim().length > 0 && model !== null && photos.length === PHOTO_COUNT && !submitting;
 
-  if (submitted) {
-    return (
-      <div className="panel space-y-5 p-6 text-center">
-        <Icon name="checkCircle" size={36} className="mx-auto text-emerald-300" />
-        <div>
-          <h2 className="text-lg font-semibold text-white">{name}</h2>
-          <p className="mt-1 text-sm text-mist-400">
-            {model?.name}
-            {isObj(model) && ` (${objUnit})`} · {PHOTO_COUNT} photos
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {photos.map((src, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={i} src={src} alt={`Photo ${i + 1}`} className="aspect-[4/3] w-full rounded-lg object-cover" />
-          ))}
-        </div>
-        <Button
-          variant="secondary"
-          icon="refresh"
-          onClick={() => {
-            setName("");
-            setModel(null);
-            setPhotos([]);
-            setSubmitted(false);
-          }}
-        >
-          New project
-        </Button>
-      </div>
-    );
-  }
+  const submit = async () => {
+    if (!canSubmit || !model) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    stopCamera();
+    try {
+      const body = new FormData();
+      body.append("projectName", name.trim());
+      body.append("model", model);
+      body.append("modelUnit", isObj(model) ? objUnit : "m");
+      const blobs = await Promise.all(photos.map(toJpeg));
+      blobs.forEach((blob, i) => body.append(`photo-${i + 1}`, blob, `photo-${i + 1}.jpg`));
+      const res = await fetch("/api/inspection", { method: "POST", body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.inspectionId) throw new Error(data.error ?? `Upload failed (${res.status})`);
+      router.push(`/inspection/${data.inspectionId}/processing`);
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : "Upload failed");
+      setSubmitting(false);
+    }
+  };
 
   return (
     <form
       className="panel space-y-6 p-6"
       onSubmit={(e) => {
         e.preventDefault();
-        if (canSubmit) setSubmitted(true);
+        void submit();
       }}
     >
       <Field label="Project name" htmlFor="project-name">
@@ -255,8 +264,10 @@ export function CaptureForm() {
         </div>
       </div>
 
+      {submitError && <p className="text-sm text-rose-300">{submitError}</p>}
+
       <Button type="submit" className="w-full" disabled={!canSubmit}>
-        Submit
+        {submitting ? "Uploading…" : "Start inspection"}
       </Button>
     </form>
   );
