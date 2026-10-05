@@ -9,7 +9,9 @@ const MIN_PHOTOS = 4;
 const MAX_PHOTOS = 40;
 const MAX_MODEL_BYTES = 100 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
-const MODEL_FORMATS = ["glb", "obj"] as const;
+const MODEL_FORMATS = ["glb", "obj", "stl"] as const;
+// GLB is always meters; OBJ and STL carry no unit, so the uploader picks one.
+const UNITLESS_FORMATS: readonly string[] = ["obj", "stl"];
 const UNITS = ["mm", "cm", "m"] as const;
 
 function bad(message: string, status = 400) {
@@ -17,6 +19,12 @@ function bad(message: string, status = 400) {
 }
 
 const startsWith = (buf: Buffer, bytes: number[]) => bytes.every((b, i) => buf[i] === b);
+
+/** Binary STL: 80-byte header, uint32 triangle count, 50 bytes per triangle. ASCII STL starts with "solid". */
+function isStl(buf: Buffer) {
+  if (buf.length >= 84 && buf.length === 84 + 50 * buf.readUInt32LE(80)) return true;
+  return buf.subarray(0, 5).toString("latin1").toLowerCase() === "solid" && buf.includes("facet");
+}
 
 /** Accept only JPEG/PNG/WebP by content, not by the (client-controlled) MIME type. */
 function isImage(buf: Buffer) {
@@ -58,14 +66,19 @@ export async function POST(request: Request) {
   const model = form.get("model");
   if (!(model instanceof File) || model.size === 0) return bad("A 3D model file is required.");
   const ext = path.extname(model.name).slice(1).toLowerCase() as (typeof MODEL_FORMATS)[number];
-  if (!MODEL_FORMATS.includes(ext)) return bad("The 3D model must be a .glb or .obj file.");
+  if (!MODEL_FORMATS.includes(ext)) return bad("The 3D model must be a .glb, .obj or .stl file.");
   if (model.size > MAX_MODEL_BYTES) return bad("The 3D model is larger than 100 MB.");
   const modelBuf = Buffer.from(await model.arrayBuffer());
   if (ext === "glb" && modelBuf.subarray(0, 4).toString("latin1") !== "glTF") return bad("The .glb file is not a valid binary glTF.");
+  if (ext === "stl" && !isStl(modelBuf)) return bad("The .stl file is not a valid ASCII or binary STL.");
 
   const unitRaw = String(form.get("modelUnit") ?? "m");
-  const modelUnit = ext === "glb" ? "m" : (UNITS as readonly string[]).includes(unitRaw) ? (unitRaw as InspectionMeta["modelUnit"]) : null;
-  if (!modelUnit) return bad("OBJ unit must be mm, cm or m.");
+  const modelUnit = !UNITLESS_FORMATS.includes(ext)
+    ? "m"
+    : (UNITS as readonly string[]).includes(unitRaw)
+      ? (unitRaw as InspectionMeta["modelUnit"])
+      : null;
+  if (!modelUnit) return bad(`${ext.toUpperCase()} unit must be mm, cm or m.`);
 
   const photos: Buffer[] = [];
   for (let i = 1; i <= MAX_PHOTOS; i++) {

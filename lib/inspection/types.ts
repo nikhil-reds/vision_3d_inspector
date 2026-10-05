@@ -24,7 +24,7 @@ export interface InspectionMeta {
   inspectionId: string;
   projectName: string;
   createdAt: string;
-  modelFormat: "glb" | "obj";
+  modelFormat: "glb" | "obj" | "stl";
   modelUnit: "mm" | "cm" | "m";
   modelFileName: string;
 }

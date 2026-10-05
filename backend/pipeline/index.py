@@ -49,7 +49,7 @@ def _stage_imports(code: str):
 
 
 def run_inspection(inspection_id: str, glb_path: Path, photo_paths: list[Path], model_unit: str = "m") -> dict:
-    """glb_path may point to a .glb or an .obj reference model (OBJ uses model_unit)."""
+    """glb_path may point to a .glb, .obj or .stl reference model (OBJ/STL use model_unit)."""
     paths = InspectionPaths(inspection_id)
     for d in OUTPUT_DIRS:  # a retry starts from clean outputs
         shutil.rmtree(paths.root / d, ignore_errors=True)

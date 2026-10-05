@@ -84,7 +84,12 @@ def coarse_register(recon: o3d.geometry.PointCloud, model_pcd: o3d.geometry.Poin
             reg.TransformationEstimationPointToPoint(with_scaling=True),
             reg.ICPConvergenceCriteria(max_iteration=30),
         )
-        score = (icp.fitness, -icp.inlier_rmse)
+        # Source-side fitness alone rewards shrinking the reconstruction until it fits inside the
+        # model, so also require the model to be covered (harmonic mean of both directions).
+        moved = o3d.geometry.PointCloud(src_down).transform(icp.transformation)
+        reverse = reg.evaluate_registration(tgt_down, moved, voxel * 1.5, np.eye(4)).fitness
+        both = 2 * icp.fitness * reverse / max(icp.fitness + reverse, 1e-12)
+        score = (both, -icp.inlier_rmse)
         if best is None or score > best[0]:
             best = (score, icp.transformation @ pre, k, icp.fitness)
 

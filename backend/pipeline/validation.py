@@ -1,4 +1,4 @@
-"""Stage 1 — Input validation (GLB or OBJ reference model + 4–40 photos or video frames)."""
+"""Stage 1 — Input validation (GLB, OBJ or STL reference model + 4–40 photos or video frames)."""
 from pathlib import Path
 
 import trimesh
@@ -9,7 +9,7 @@ from .errors import PipelineError
 
 
 def load_model_mesh(model_path: Path, unit: str = "m") -> trimesh.Trimesh:
-    """Load a GLB or OBJ as a single triangle mesh in meters (scene transforms applied)."""
+    """Load a GLB, OBJ or STL as a single triangle mesh in meters (scene transforms applied)."""
     fmt = model_path.suffix.lower().lstrip(".")
     try:
         mesh = trimesh.load(str(model_path), file_type=fmt, force="mesh", process=True)
@@ -17,7 +17,7 @@ def load_model_mesh(model_path: Path, unit: str = "m") -> trimesh.Trimesh:
         raise PipelineError("invalid_glb", f"{fmt.upper()} could not be parsed: {e}") from e
     if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
         raise PipelineError("invalid_glb", f"{fmt.upper()} contains no triangle geometry.")
-    if fmt == "obj":
+    if fmt in config.UNITLESS_FORMATS:
         mesh.apply_scale(config.UNIT_TO_METERS[unit])
     return mesh
 
@@ -25,9 +25,9 @@ def load_model_mesh(model_path: Path, unit: str = "m") -> trimesh.Trimesh:
 def validate_inputs(model_path: Path, photo_paths: list[Path], unit: str = "m") -> dict:
     fmt = model_path.suffix.lower().lstrip(".")
     if fmt not in config.MODEL_FORMATS:
-        raise PipelineError("invalid_glb", f"Unsupported model format .{fmt} (use .glb or .obj).")
-    if fmt == "obj" and unit not in config.UNIT_TO_METERS:
-        raise PipelineError("invalid_glb", f"Unknown OBJ unit {unit!r}.")
+        raise PipelineError("invalid_glb", f"Unsupported model format .{fmt} (use .glb, .obj or .stl).")
+    if fmt in config.UNITLESS_FORMATS and unit not in config.UNIT_TO_METERS:
+        raise PipelineError("invalid_glb", f"Unknown {fmt.upper()} unit {unit!r}.")
     if not model_path.is_file():
         raise PipelineError("invalid_glb", "3D model file is missing.")
     size = model_path.stat().st_size
@@ -68,7 +68,7 @@ def validate_inputs(model_path: Path, photo_paths: list[Path], unit: str = "m") 
         "model": {
             "path": str(model_path),
             "format": fmt,
-            "unit": "m" if fmt == "glb" else unit,
+            "unit": unit if fmt in config.UNITLESS_FORMATS else "m",
             "vertices": int(len(mesh.vertices)),
             "faces": int(len(mesh.faces)),
             "extentsM": [float(x) for x in extents],

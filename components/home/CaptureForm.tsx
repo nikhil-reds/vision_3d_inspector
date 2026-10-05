@@ -10,7 +10,7 @@ import { Tabs } from "@/components/ui/Tabs";
 import { extractVideoFrames } from "@/lib/videoFrames";
 
 const PHOTO_COUNT = 4;
-const VIDEO_FRAME_COUNT = 25;
+const VIDEO_FRAME_COUNT = 12;
 
 type Source = "video" | "photos";
 const sourceTabs: { id: Source; label: string; icon: "video" | "camera" }[] = [
@@ -18,17 +18,21 @@ const sourceTabs: { id: Source; label: string; icon: "video" | "camera" }[] = [
   { id: "photos", label: `${PHOTO_COUNT} photos`, icon: "camera" },
 ];
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
-const MODEL_EXTENSIONS = [".glb", ".obj"];
+const MODEL_EXTENSIONS = [".glb", ".obj", ".stl"];
 
-// GLB is always in meters; OBJ has no unit, so the user picks it.
-type ObjUnit = "mm" | "cm" | "m";
-const objUnitOptions: { value: ObjUnit; label: string }[] = [
+// GLB is always in meters; OBJ and STL have no unit, so the user picks it.
+type ModelUnit = "mm" | "cm" | "m";
+const unitOptions: { value: ModelUnit; label: string }[] = [
   { value: "mm", label: "Millimeters (mm)" },
   { value: "cm", label: "Centimeters (cm)" },
   { value: "m", label: "Meters (m)" },
 ];
 
-const isObj = (file: File | null) => !!file && file.name.toLowerCase().endsWith(".obj");
+/** "OBJ" / "STL" when the file format stores no unit, otherwise null. */
+const unitlessFormat = (file: File | null) => {
+  const ext = file?.name.toLowerCase().split(".").pop();
+  return ext === "obj" || ext === "stl" ? ext.toUpperCase() : null;
+};
 
 const MAX_UPLOAD_SIDE = 2048;
 
@@ -58,7 +62,7 @@ export function CaptureForm() {
   const [name, setName] = useState("");
   const [model, setModel] = useState<File | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [objUnit, setObjUnit] = useState<ObjUnit>("mm");
+  const [modelUnit, setModelUnit] = useState<ModelUnit>("mm");
   const [source, setSource] = useState<Source>("video");
   const [photos, setPhotos] = useState<string[]>([]);
   const [video, setVideo] = useState<File | null>(null);
@@ -161,7 +165,7 @@ export function CaptureForm() {
     if (!file) return;
     if (!MODEL_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) {
       setModel(null);
-      setModelError("Only .glb and .obj files are supported.");
+      setModelError("Only .glb, .obj and .stl files are supported.");
       return;
     }
     setModelError(null);
@@ -179,7 +183,7 @@ export function CaptureForm() {
       const body = new FormData();
       body.append("projectName", name.trim());
       body.append("model", model);
-      body.append("modelUnit", isObj(model) ? objUnit : "m");
+      body.append("modelUnit", unitlessFormat(model) ? modelUnit : "m");
       const blobs = await Promise.all(images.map(toJpeg));
       blobs.forEach((blob, i) => body.append(`photo-${i + 1}`, blob, `photo-${i + 1}.jpg`));
       const res = await fetch("/api/inspection", { method: "POST", body });
@@ -204,7 +208,7 @@ export function CaptureForm() {
         <TextInput id="project-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. HB-220 Hydraulic Bracket" required />
       </Field>
 
-      <Field label="3D model (GLB / OBJ)" htmlFor="project-model" error={modelError ?? undefined}>
+      <Field label="3D model (GLB / OBJ / STL)" htmlFor="project-model" error={modelError ?? undefined}>
         <label
           htmlFor="project-model"
           className="flex cursor-pointer items-center gap-3 rounded-xl bg-ink-800 p-3 ring-1 ring-inset ring-white/10 transition hover:ring-white/20"
@@ -213,7 +217,7 @@ export function CaptureForm() {
             <Icon name="cube" size={18} />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm text-white">{model ? model.name : "Choose .glb or .obj file"}</span>
+            <span className="block truncate text-sm text-white">{model ? model.name : "Choose .glb, .obj or .stl file"}</span>
             <span className="block text-xs text-mist-400">{model ? formatSize(model.size) : "Reference design to compare against"}</span>
           </span>
           {model && <Icon name="checkCircle" size={18} className="text-emerald-300" />}
@@ -221,15 +225,19 @@ export function CaptureForm() {
         <input
           id="project-model"
           type="file"
-          accept=".glb,.obj,model/gltf-binary,model/obj"
+          accept=".glb,.obj,.stl,model/gltf-binary,model/obj,model/stl"
           className="sr-only"
           onChange={(e) => pickModel(e.target.files?.[0])}
         />
       </Field>
 
-      {isObj(model) && (
-        <Field label="OBJ units" htmlFor="project-obj-unit" hint="OBJ files don't store units — pick the unit the model was exported in.">
-          <Select id="project-obj-unit" value={objUnit} options={objUnitOptions} onChange={setObjUnit} />
+      {unitlessFormat(model) && (
+        <Field
+          label={`${unitlessFormat(model)} units`}
+          htmlFor="project-model-unit"
+          hint={`${unitlessFormat(model)} files don't store units — pick the unit the model was exported in.`}
+        >
+          <Select id="project-model-unit" value={modelUnit} options={unitOptions} onChange={setModelUnit} />
         </Field>
       )}
 
@@ -287,7 +295,7 @@ export function CaptureForm() {
           {videoError && <p className="text-xs text-rose-300">{videoError}</p>}
 
           {(frames.length > 0 || extracted !== null) && (
-            <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-7">
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
               {Array.from({ length: VIDEO_FRAME_COUNT }, (_, i) => (
                 <div key={i} className="relative aspect-square overflow-hidden rounded-lg bg-ink-800 ring-1 ring-inset ring-white/10">
                   {frames[i] ? (

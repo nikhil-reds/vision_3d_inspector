@@ -23,7 +23,7 @@ class InspectionPaths:
 
     @property
     def model(self) -> Path:
-        """input/model.glb or input/model.obj, whichever was uploaded."""
+        """input/model.glb, model.obj or model.stl, whichever was uploaded."""
         for ext in MODEL_FORMATS:
             p = self.root / "input" / f"model.{ext}"
             if p.is_file():

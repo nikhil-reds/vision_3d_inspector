@@ -5,10 +5,16 @@ import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { explainDifferences, type DifferencePoint } from "@/lib/inspection/differences";
-import { isInspectionId, readReport, readStatus } from "@/lib/inspection/server";
+import { isInspectionId, readMeta, readReport, readStatus } from "@/lib/inspection/server";
+import { ExportPdfButton } from "@/components/report/ExportPdfButton";
 import type { Verdict } from "@/lib/inspection/types";
 
-export const metadata: Metadata = { title: "Inspection report" };
+// The title becomes the default file name when the report is saved as PDF.
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const meta = isInspectionId(id) ? await readMeta(id) : null;
+  return { title: meta ? `${meta.projectName} – Inspection report` : "Inspection report" };
+}
 
 const verdictStyle: Record<Verdict, { tone: string; icon: IconName; text: string }> = {
   PASS: { tone: "bg-emerald-400/10 text-emerald-300 ring-emerald-400/30", icon: "checkCircle", text: "Within tolerance" },
@@ -84,15 +90,18 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 <dt className="inline">Model </dt>
                 <dd className="inline text-mist-300">
                   {meta.modelFileName}
-                  {meta.modelFormat === "obj" && ` (${meta.modelUnit})`}
+                  {meta.modelFormat !== "glb" && ` (${meta.modelUnit})`}
                 </dd>
               </div>
             )}
           </dl>
         </div>
-        <Button href="/" icon="plus" variant="secondary">
-          New inspection
-        </Button>
+        <div className="flex gap-2 print:hidden">
+          <Button href="/" icon="plus" variant="secondary">
+            New inspection
+          </Button>
+          <ExportPdfButton />
+        </div>
       </div>
 
       {/* Overall result */}
@@ -182,7 +191,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
         <img src={result.files.heatmap} alt="Deviation heatmap across all views" className="w-full rounded-xl" />
         <div className="space-y-4">
           {result.files.views.map((view, i) => (
-            <div key={view} className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div key={view} className="print-keep grid grid-cols-1 gap-3 sm:grid-cols-3">
               {[
                 { src: view, label: `Photo ${i + 1}` },
                 { src: result.files.renders[i], label: "Rendered model" },

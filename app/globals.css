@@ -128,6 +128,41 @@ body {
   background-repeat: no-repeat;
 }
 
+/* Print / "Save as PDF": keep the dark report design and avoid splitting cards across pages. */
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  html,
+  body {
+    background: var(--color-ink-950) !important;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    animation: none !important;
+  }
+  main {
+    padding: 12mm 10mm !important;
+  }
+  .panel {
+    background: var(--color-ink-850);
+    box-shadow: none;
+  }
+  .panel,
+  figure,
+  li,
+  tr,
+  img,
+  .print-keep {
+    break-inside: avoid;
+  }
+  h2 {
+    break-after: avoid;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

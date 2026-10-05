@@ -22,8 +22,9 @@ VERDICT_METRIC = "meanDeviationMm"  # which metric the verdict is based on
 MIN_PHOTOS = 4   # 4 hand-taken photos, or up to MAX_PHOTOS frames extracted from a video
 MAX_PHOTOS = 40
 MAX_MODEL_BYTES = 100 * 1024 * 1024
-MODEL_FORMATS = ("glb", "obj")
-# GLB is meters by spec; OBJ is unitless, so the uploader states its unit.
+MODEL_FORMATS = ("glb", "obj", "stl")
+# GLB is meters by spec; OBJ and STL are unitless, so the uploader states their unit.
+UNITLESS_FORMATS = ("obj", "stl")
 UNIT_TO_METERS = {"mm": 0.001, "cm": 0.01, "m": 1.0}
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MIN_IMAGE_SIDE_PX = 256
